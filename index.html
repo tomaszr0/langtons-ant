@@ -273,7 +273,7 @@
     }
     
     function save(){
-        document.getElementById('save').download='langton-R-'+antCount+'-'+colors.length+'-'+(i-i%jumpValue)+'.png';
+        document.getElementById('save').download='langton-R-'+antCount+'-'+colors.length+'-'+(i)+'.png';
         document.getElementById('save').href=c.toDataURL("image/png").replace("image/png", "image/octet-stream");
     }
     
