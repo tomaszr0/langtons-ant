@@ -1,0 +1,449 @@
+<!doctype html>
+<meta charset='utf-8'>
+<style>
+    body{
+        background-color:gray;
+    }
+    #stage1 > input, #stage1 > button{
+        display:block;
+    }
+    #stage2{display:none};
+    
+    .ant{
+        box-shadow:inset 0 0 0 1px white;
+    }
+    #step2 input{width:50px;display:inline-block !important;}
+    #jumpValue{text-align:right;}
+</style>
+<body>
+    <div id='stage1'>
+        <input id='antCount' placeholder='Amount of ants'>
+        <select id='colors'>
+            <option value=0>black and white (2 states)</option>
+            <option value=1>some colors (6 states)</option>
+            <option value=2>grayscale (256 states)</option>
+            <option value=3>blue-green-red transition (512)</option>
+        </select>
+        <button id='initiate'>Initiate</button>
+    </div>
+    <div id='stage2'>
+        <button id='return'>Return</button>
+        <button id='hideAnts' onclick='hideAnts()'>Hide ants</button>
+        <button id='zoom-in'>+</button><button id='zoom-out'>-</button><span id='zoom'></span>
+        <span id='size'></span>
+        <span id='tmain'></span> <span id='tdraw'></span>
+        <a id='save'><button>Save image</button></a><br>
+        <button id='backJump'>&lt;&lt;</button><button id='back'>&lt;</button> <input id='iteration'> <button id='forward'>></button><button id='forwardJump'>>></button> Jump every <input id='jumpValue'>th iteration <button id='auto'>Jump automatically</button><br>
+        <canvas></canvas>
+    </div>
+</body>
+<script>
+    
+    // VARS
+    var mainRunning=0;
+    var c,p,ants,map,i;
+    // VARS /
+    
+    // SETTINGS
+    var colors;
+    var auto=0;
+    var antCount=1;
+    var showAnt=1;
+    var jumpValue=100;
+    var zoom=16;
+    // SETTINGS /
+    
+    // COLORS
+    colorsBase=[];
+    colorsBase[colorsBase.length]=['white','black'];
+    colorsBase[colorsBase.length]=['#cc3333','#33cc33','#3333cc','#cccc33','#33cccc','#cc33cc'];
+        // GRAYSCALE
+    tmp=[];
+    for(x=0;x<=255;x+=1)
+        tmp[tmp.length]='rgb('+[x,x,x].join(',')+')';
+    colorsBase[colorsBase.length]=tmp;
+        // /
+    
+        // BGR
+    tmp=[];
+    for(r=0;r<=255;r+=32)
+        for(g=0;g<=255;g+=32)
+            for(b=0;b<=255;b+=32)
+                tmp[tmp.length]='rgb('+[r,g,b].join(',')+')';
+    colorsBase[colorsBase.length]=tmp;
+        // /
+    // COLORS /
+    
+    // CONTROLS
+    document.getElementById('initiate').onclick=ini;
+    document.getElementById('return').onclick=iniReturn;
+    document.getElementById('save').onclick=save;
+    document.getElementById('zoom-in').onclick=zoomIn;
+    document.getElementById('zoom-out').onclick=zoomOut;
+    document.getElementById('backJump').onclick=function(){main(-2)};
+    document.getElementById('back').onclick=function(){main(-1)};
+    document.getElementById('forward').onclick=function(){main(1)};
+    document.getElementById('forwardJump').onclick=function(){main(2)};
+    iterationUpdate(0);
+    document.getElementById('iteration').oninput=function(){
+        this.value=intSeparate(this.value.replace(/[.,]/g,''));
+        inputWidth(document.getElementById('iteration'));
+    };
+    document.getElementById('iteration').onkeyup=function(e){
+        val=this.value.replace(/[.,]/g,'');
+        if(e.which!=13) return;
+        if(parseInt(val)==val)
+            main(0,val);
+        else
+            this.value=intSeparate(i);
+    };
+    document.getElementById('jumpValue').value=jumpValue;
+    document.getElementById('jumpValue').oninput=function(){
+        if(parseInt(this.value,10)!=this.value || this.value.substr(0,1)=='0')
+            this.value=jumpValue;
+        else
+            jumpValue=parseInt(this.value,10);
+        inputWidth(this);
+    }
+    document.getElementById('auto').onclick=autoF;
+    // CONTROLS /
+    
+    function ini(){
+        antCount=document.getElementById('antCount').value;
+        color=document.getElementById('colors').value;
+        if(parseInt(antCount,10)!=antCount || !(colors=colorsBase[color]))
+            return;
+        c=document.getElementsByTagName('canvas')[0];
+        p=c.getContext("2d",{alpha:true});
+        i=0;
+        auto=0;
+        map=[[0]];
+        ants=[];
+        for(i=antCount;i>0;i--)
+            ants[ants.length]={side:1,x:0,y:0};
+        zoomUpdate()
+        document.getElementById('stage1').style.display='none';
+        document.getElementById('stage2').style.display='block';
+    }
+    
+    function iniReturn(){
+        auto=0;
+        document.getElementById('stage2').style.display='none';
+        document.getElementById('stage1').style.display='block';
+    }
+    
+    async function main(mode,iDst=0){
+        if(mainRunning) return;
+        mainRunning=1;
+        
+        switch(mode){
+            case -1: iDst=i-1;break;
+            case 1:  iDst=i+1;break;
+            case -2: iDst=previousJump();break;
+            case 2:  iDst=nextJump();break;
+        }
+        if(iDst<0) iDst=0;
+        if(iDst>i) reverse=0; else reverse=1;
+        t=Date.now();
+        t2=Date.now();
+        while(i!=iDst){
+            if(Date.now()-t2>40){
+                t2=Date.now();
+                iterationUpdate(`${i}->${iDst}`)
+                await iterate(reverse);
+            }
+            else
+                iterate(reverse);
+        }
+        drawMap(map);
+        iterationUpdate(i);
+        document.getElementById('tmain').innerHTML='tmain='+(Date.now()-t);
+        
+        if(auto)
+            setTimeout(function(){mainRunning=0;main(2)},250);
+        else
+            mainRunning=0;
+        return;
+    }
+    
+    function autoF(){
+        if(auto){
+            document.getElementById('auto').innerHTML='Jump automatically';
+            auto=0;
+        }
+        else{
+            document.getElementById('auto').innerHTML='Stop';
+            auto=1;
+            main(2);
+        }
+        return;
+    }
+    
+    function iterate(reverse){
+        tmain=Date.now();
+        if(reverse && i<=0)
+            return;
+        if(reverse)
+            i--;
+        else
+            i++;
+        Object.keys(ants.reverse()).forEach(function(k){
+            ant=ants[k];
+            x=ant.x;
+            y=ant.y;
+            if(reverse){ // reverse mode
+                flag=0; // level remove flag
+                switch(ant.side){
+    // additional instructions will attempt to remove levels if they seem to be intact
+                    case 1: // top level
+                        if(!y){
+                            flag=1;
+                            map[0].forEach(function(el){
+                                if(el)
+                                    flag=0;
+                            });
+                        }
+                        if(!flag)
+                        y++;
+                        break;
+                    case 2: // right
+                        if(x==map[0].length-1){
+                            flag=1;
+                            map.forEach(function(y){
+                                if(y[y.length-1])
+                                    flag=0;
+                            });
+                        }
+                        x--;
+                        break;
+                    case 3: // bottom level
+                        if(y==map.length-1){
+                            flag=1;
+                            map[map.length-1].forEach(function(el){
+                                if(el)
+                                    flag=0;
+                            });
+                        }
+                        y--;
+                        break;
+                    case 4: // left
+                        if(!x){
+                            flag=1;
+                            map.forEach(function(y){
+                                if(y[0])
+                                    flag=0;
+                            });
+                        }
+                        if(!flag)
+                        x++;
+                        break;
+                }
+                if(flag)
+                    removeLevel(ant.side);
+                ants[k].x=x;
+                ants[k].y=y;
+                if(--map[y][x]<0) // changes cell state in backwards order
+                    map[y][x]=colors.length-1;
+                if(map[y][x]%2==0) // if cell's state is even, turns left
+                    turnL(k);
+                else // if cell's state is odd, turns right
+                    turnR(k);
+            }
+            else{ // normal mode
+                if(map[y][x]%2==0)
+                    turnR(k);
+                else
+                    turnL(k);
+                if(++map[y][x]>colors.length-1)
+                    map[y][x]=0;
+                switch(ant.side){
+                    case 1: y--;break;
+                    case 2: x++;break;
+                    case 3: y++;break;
+                    case 4: x--;break;
+                }
+                ants[k].x=x;
+                ants[k].y=y;
+                if(typeof map[y] == 'undefined')
+                    addLevel(ant.side);
+                else if(typeof map[y][x] == 'undefined')
+                    addLevel(ant.side);
+            }
+        });
+        
+        return new Promise(resolve=>{
+            setTimeout(function(){resolve()},0);
+        });
+    }
+    
+    function save(){
+        document.getElementById('save').download='langton-R-'+antCount+'-'+colors.length+'-'+(i-i%jumpValue)+'.png';
+        document.getElementById('save').href=c.toDataURL("image/png").replace("image/png", "image/octet-stream");
+    }
+    
+    function antsOnCoord(coords){
+        iTmp=0;
+        if(typeof coords.x !='undefined'){
+            ants.forEach(function(ant){
+                if(ant.x==coords.x)
+                    iTmp++;
+            });
+        }
+        else if(typeof coords.y !='undefined'){
+            ants.forEach(function(ant){
+                if(ant.y==coords.y)
+                    iTmp++;
+            });
+        }
+        return iTmp;
+    }
+    
+    function hideAnts(){
+        if(showAnt){
+            showAnt=0;
+            document.getElementById('hideAnts').innerHTML='Show ants';
+        }
+        else{
+            showAnt=1;
+            document.getElementById('hideAnts').innerHTML='Hide ants';
+        }
+        drawMap(map);
+    }
+    
+    function iterationUpdate(str){
+        document.getElementById('iteration').value=intSeparate(str);
+        inputWidth(document.getElementById('iteration'));
+    }
+    
+    function inputWidth(elem){
+        span=document.createElement('span');
+        span.style.fontSize=elem.style.fontSize;
+        span.style.display='hidden';
+        span.innerHTML=elem.value;
+        document.body.append(span);
+        elem.style.width=span.scrollWidth+'px';
+        span.parentNode.removeChild(span);
+        return;
+    }
+    
+    function zoomOut(){
+        if((zoom/=2)<1)
+            zoom=1;
+        zoomUpdate()
+    }
+    function zoomIn(){
+        if((zoom*=2)>64)
+            zoom=64;
+        zoomUpdate()
+    }
+    function zoomUpdate(){
+        document.getElementById('zoom').innerHTML="x"+zoom;
+        drawMap(map);
+    }
+    function turnR(k){
+        ants[k].side++;
+        if(ants[k].side==5)
+            ants[k].side=1;
+    }
+    function turnL(k){
+        ants[k].side--;
+        if(ants[k].side==0)
+            ants[k].side=4;
+    }
+    
+    function removeLevel(side){
+        if(side==1){
+                map.shift();
+                Object.keys(ants).forEach(function(k){
+                    ants[k].y--;
+                });
+        }
+        else if(side==2)
+            Object.keys(map).forEach(function(y){
+                map[y].pop();
+            });
+        else if(side==3)
+            map.pop();
+        else if(side==4){
+            Object.keys(map).forEach(function(y){
+                map[y].shift();
+            });
+            Object.keys(ants).forEach(function(k){
+                ants[k].x--;
+            });
+        }
+    
+    }
+    
+    function addLevel(side){
+        if(side==1 || side==3){
+            level=[];
+            Object.keys(map[0]).forEach(function(k){ 
+                level[level.length]=0;
+            });
+            if(side==1){
+                map.unshift(level);
+                Object.keys(ants).forEach(function(k){
+                    ants[k].y++;
+                });
+            }
+            else
+                map.push(level);
+        }
+        else if(side==2 || side==4){
+            Object.keys(map).forEach(function(k){
+                if(side==2)
+                    map[k].push(0);
+                else
+                    map[k].unshift(0);
+            });
+            if(side==4)
+                Object.keys(ants).forEach(function(k){
+                        ants[k].x++;
+                });
+        }
+        return;
+    }
+    
+    function drawMap(map){
+        tdraw=Date.now();
+        c.height=map.length*zoom;
+        c.width=map[0].length*zoom;
+        Object.keys(map).forEach(function(y){
+            Object.keys(map[y]).forEach(function(x){
+                state=map[y][x];
+                p.fillStyle=colors[map[y][x]];
+                p.fillRect(x*zoom,y*zoom,zoom,zoom);
+            });
+        });
+        p.fillStyle='red';
+        if(showAnt)
+            Object.keys(ants).forEach(function(k){
+                x=ants[k].x;
+                y=ants[k].y;
+                p.fillRect(x*zoom,y*zoom,zoom,zoom);
+            });
+        document.getElementById('size').innerHTML=map[0].length+"x"+map.length;
+        document.getElementById('tdraw').innerHTML='tdraw='+(Date.now()-tdraw);
+        return;
+    }
+    
+    function nextJump(int=i,d=jumpValue){
+        return int+d-int%d;
+    }
+    function previousJump(int=i,d=jumpValue){
+        return --int-int%d;
+    }
+    
+    function intSeparate(int){
+        iTmp=0;
+        int=int+'';
+        int=int.split("").reverse().join("");
+        while(int.length-iTmp>3){
+            int=int.substr(0,iTmp+3)+','+int.substr(iTmp+3);
+            iTmp+=4;
+        }
+        int=int.split("").reverse().join("");
+        return int;
+    }
+</script>
